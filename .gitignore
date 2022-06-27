@@ -1,0 +1,7 @@
+#ignore big data
+*.hex
+*.elf
+*.map
+
+*.d
+*.o
