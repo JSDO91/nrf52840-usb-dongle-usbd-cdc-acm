@@ -69,15 +69,20 @@ APP_USBD_CDC_ACM_GLOBAL_DEF(m_app_cdc_acm,
 static char m_rx_buffer[READ_SIZE];
 //static char m_tx_buffer[NRF_DRV_USBD_EPSIZE];
 // 2020/06/21 jaesun, edit
-static bool m_send_flag = 0;
+static bool m_send_flag = false;
+
 
 // 2022/06/20 jaesun
 #define MAX_GTS_GAP     1024
 #define MAX_USB_TX_BUF_LEN  240
 
-bool m_send_tx_done = 0;
+bool m_send_tx_done = false;
 static char m_tx_buffer[MAX_USB_TX_BUF_LEN] = {0,};
 uint8_t usb_tx_buff[MAX_USB_TX_BUF_LEN]     = {0,};
+
+static char m_rx_test_buffer[MAX_USB_TX_BUF_LEN];
+static uint32_t m_rx_test_buffer_idx = 0;
+
 
 uint32_t gts_start = 0;
 uint32_t gts_end   = 0;
@@ -96,7 +101,38 @@ uint32_t gtick_1ms   = 0;
 
 uint32_t totalTxByte = 0;
 
+bool usb_open   = false;
+bool usb_close  = false;
+
+#define RECV_BUF_LEN 256
+
+uint32_t gsingle_transfer_size = 0;
+uint8_t gbuf_usb_rx[MAX_USB_TX_BUF_LEN]; 
+
+static char m_cdc_data_array[RECV_BUF_LEN]  = {0};
+volatile uint32_t buffer_available_widx      = 0;
+volatile uint32_t buffer_available_ridx      = 0;
+
+
 APP_TIMER_DEF(m_bsp_tmr);
+
+
+uint32_t gDataGoodCnt = 0;
+uint32_t gDataBadCnt  = 0;
+
+void Check_Data(uint8_t* ptrbuf)
+{
+    uint8_t idx     = 0;
+    uint8_t initval = ptrbuf[0];
+    for(idx = 0; idx < MAX_USB_TX_BUF_LEN; idx++)
+    {
+        if(ptrbuf[idx] != ((initval+idx)&0xFF))
+            gDataBadCnt++;
+        else
+            gDataGoodCnt++;
+
+    }
+}
 ////////////////////
 static void cdc_acm_user_ev_handler(app_usbd_class_inst_t const * p_inst,
                                     app_usbd_cdc_acm_user_event_t event)
@@ -110,40 +146,48 @@ static void cdc_acm_user_ev_handler(app_usbd_class_inst_t const * p_inst,
             bsp_board_led_on(LED_CDC_ACM_OPEN);
 
             /*Setup first transfer*/
+#if 0
             ret_code_t ret = app_usbd_cdc_acm_read(&m_app_cdc_acm,
                                                    m_rx_buffer,
                                                    READ_SIZE);
+
             UNUSED_VARIABLE(ret);
+            usb_open  = true;
+            usb_close = false;
+
+#else
+            app_usbd_cdc_acm_read(&m_app_cdc_acm, &m_cdc_data_array[buffer_available_widx++], READ_SIZE);  // necessary it seems    
+#endif  
             break;
         }
         case APP_USBD_CDC_ACM_USER_EVT_PORT_CLOSE:
             bsp_board_led_off(LED_CDC_ACM_OPEN);
+            usb_close = true;
+            usb_open  = false;
             break;
         case APP_USBD_CDC_ACM_USER_EVT_TX_DONE:
 // 2022/06/20 jaesun, add
-            m_send_tx_done = 1;            
+            m_send_tx_done = true;            
             bsp_board_led_invert(LED_CDC_ACM_TX);
             break;
         case APP_USBD_CDC_ACM_USER_EVT_RX_DONE:
         {
             ret_code_t ret;
 
-            app_usbd_cdc_acm_bytes_stored(p_cdc_acm);
             do
             {
-                /*Get amount of data transfered*/
-                size_t size = app_usbd_cdc_acm_rx_size(p_cdc_acm);
-
-                /* Fetch data until internal buffer is empty */
-                ret = app_usbd_cdc_acm_read(&m_app_cdc_acm,
-                                            m_rx_buffer,
-                                            READ_SIZE);
-            } while (ret == NRF_SUCCESS);
-// 2022/06/22 jaesun, prevent for pc app test
-            memcpy(m_tx_buffer,m_rx_buffer,READ_SIZE);
-            app_usbd_cdc_acm_write(&m_app_cdc_acm, m_tx_buffer, READ_SIZE); //
+                ret = app_usbd_cdc_acm_read(&m_app_cdc_acm, &m_cdc_data_array[(buffer_available_widx++)&0xFF], READ_SIZE);
+                gbuf_usb_rx[gsingle_transfer_size++] = m_cdc_data_array[(buffer_available_ridx++)&0xFF];
+            }
+            while (ret == NRF_SUCCESS);
             
-            m_send_flag = !m_send_flag;
+            if(gsingle_transfer_size == MAX_USB_TX_BUF_LEN)
+            {
+                Check_Data(gbuf_usb_rx);
+                gsingle_transfer_size = 0;
+            }
+            m_send_flag     = true;
+            m_send_tx_done  = true;
 
             bsp_board_led_invert(LED_CDC_ACM_RX);
             break;
@@ -253,6 +297,8 @@ void Make_USBD_TX_DATA_PATTERN(uint8_t* dataPtr, uint32_t dataLen, uint32_t data
     }
 }
 
+
+
 int main(void)
 {
     ret_code_t ret;
@@ -304,25 +350,25 @@ int main(void)
         {
 
 #if 1
-          if(gtx_save == 0)
-          {
-              gts_cur  = app_timer_cnt_get();
-              gtx_save = 1;
-          }
+            if(gtx_save == 0)
+            {
+                gts_cur  = app_timer_cnt_get();
+                gtx_save = 1;
+            }
 #else
-        gts_pre             = gts_cur;
-        gts_cur             = app_timer_cnt_get();
-        gts_gap[gts_cnt++]  = gts_cur - gts_pre;
+            gts_pre             = gts_cur;
+            gts_cur             = app_timer_cnt_get();
+            gts_gap[gts_cnt++]  = gts_cur - gts_pre;
 
-        if(gts_cnt >= MAX_GTS_GAP)
-            gts_cnt = 0;
+            if(gts_cnt >= MAX_GTS_GAP)
+                gts_cnt = 0;
 #endif
-          memcpy(m_tx_buffer,usb_tx_buff,MAX_USB_TX_BUF_LEN);
-          app_usbd_cdc_acm_write(&m_app_cdc_acm, m_tx_buffer, MAX_USB_TX_BUF_LEN);
+            memcpy(m_tx_buffer,usb_tx_buff,MAX_USB_TX_BUF_LEN);
+            app_usbd_cdc_acm_write(&m_app_cdc_acm, m_tx_buffer, MAX_USB_TX_BUF_LEN);
 
-          totalTxByte     += MAX_USB_TX_BUF_LEN;
-          gtx_pkt_num++;
-          m_send_tx_done  = 0;
+            totalTxByte     += MAX_USB_TX_BUF_LEN;
+            gtx_pkt_num++;
+            m_send_tx_done  = false;
         }
     }
 }
