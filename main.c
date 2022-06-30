@@ -70,13 +70,12 @@ static char m_rx_buffer[READ_SIZE];
 //static char m_tx_buffer[NRF_DRV_USBD_EPSIZE];
 // 2020/06/21 jaesun, edit
 static bool m_send_flag = false;
-
+bool m_send_tx_done = false;
 
 // 2022/06/20 jaesun
 #define MAX_GTS_GAP     1024
 #define MAX_USB_TX_BUF_LEN  240
 
-bool m_send_tx_done = false;
 static char m_tx_buffer[MAX_USB_TX_BUF_LEN] = {0,};
 uint8_t usb_tx_buff[MAX_USB_TX_BUF_LEN]     = {0,};
 
@@ -146,18 +145,7 @@ static void cdc_acm_user_ev_handler(app_usbd_class_inst_t const * p_inst,
             bsp_board_led_on(LED_CDC_ACM_OPEN);
 
             /*Setup first transfer*/
-#if 0
-            ret_code_t ret = app_usbd_cdc_acm_read(&m_app_cdc_acm,
-                                                   m_rx_buffer,
-                                                   READ_SIZE);
-
-            UNUSED_VARIABLE(ret);
-            usb_open  = true;
-            usb_close = false;
-
-#else
-            app_usbd_cdc_acm_read(&m_app_cdc_acm, &m_cdc_data_array[buffer_available_widx++], READ_SIZE);  // necessary it seems    
-#endif  
+            app_usbd_cdc_acm_read(&m_app_cdc_acm, &m_cdc_data_array[buffer_available_widx++], READ_SIZE);  // necessary it seems
             break;
         }
         case APP_USBD_CDC_ACM_USER_EVT_PORT_CLOSE:
@@ -176,8 +164,11 @@ static void cdc_acm_user_ev_handler(app_usbd_class_inst_t const * p_inst,
 
             do
             {
-                ret = app_usbd_cdc_acm_read(&m_app_cdc_acm, &m_cdc_data_array[(buffer_available_widx++)&0xFF], READ_SIZE);
-                gbuf_usb_rx[gsingle_transfer_size++] = m_cdc_data_array[(buffer_available_ridx++)&0xFF];
+                ret = app_usbd_cdc_acm_read(&m_app_cdc_acm, &m_cdc_data_array[buffer_available_widx], READ_SIZE);
+                gbuf_usb_rx[gsingle_transfer_size++] = m_cdc_data_array[buffer_available_ridx];
+
+                buffer_available_widx = (++buffer_available_widx)&0xFF;
+                buffer_available_ridx = (++buffer_available_ridx)&0xFF;
             }
             while (ret == NRF_SUCCESS);
             
