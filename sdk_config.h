@@ -1093,7 +1093,7 @@
 // <i> Note: This value is not editable in Configuration Wizard.
 // <i> Selected Product ID
 #ifndef APP_USBD_PID
-#define APP_USBD_PID 0x520F
+#define APP_USBD_PID 0x5202
 #endif
 
 // <o> APP_USBD_DEVICE_VER_MAJOR - Major device version  <0-99> 

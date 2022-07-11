@@ -118,6 +118,7 @@ APP_TIMER_DEF(m_bsp_tmr);
 
 uint32_t gDataGoodCnt = 0;
 uint32_t gDataBadCnt  = 0;
+uint32_t gRxBytesCnt  = 0;
 
 void Check_Data(uint8_t* ptrbuf)
 {
@@ -143,15 +144,15 @@ static void cdc_acm_user_ev_handler(app_usbd_class_inst_t const * p_inst,
         case APP_USBD_CDC_ACM_USER_EVT_PORT_OPEN:
         {
             bsp_board_led_on(LED_CDC_ACM_OPEN);
-
+            m_send_flag     = true;
+            m_send_tx_done  = true;
             /*Setup first transfer*/
             app_usbd_cdc_acm_read(&m_app_cdc_acm, &m_cdc_data_array[buffer_available_widx++], READ_SIZE);  // necessary it seems
             break;
         }
         case APP_USBD_CDC_ACM_USER_EVT_PORT_CLOSE:
             bsp_board_led_off(LED_CDC_ACM_OPEN);
-            usb_close = true;
-            usb_open  = false;
+            m_send_flag = false;
             break;
         case APP_USBD_CDC_ACM_USER_EVT_TX_DONE:
 // 2022/06/20 jaesun, add
@@ -169,6 +170,8 @@ static void cdc_acm_user_ev_handler(app_usbd_class_inst_t const * p_inst,
 
                 buffer_available_widx = (++buffer_available_widx)&0xFF;
                 buffer_available_ridx = (++buffer_available_ridx)&0xFF;
+
+                //gRxBytesCnt++;
             }
             while (ret == NRF_SUCCESS);
             
@@ -177,8 +180,8 @@ static void cdc_acm_user_ev_handler(app_usbd_class_inst_t const * p_inst,
                 Check_Data(gbuf_usb_rx);
                 gsingle_transfer_size = 0;
             }
-            m_send_flag     = true;
-            m_send_tx_done  = true;
+//            m_send_flag     = true;
+//            m_send_tx_done  = true;
 
             bsp_board_led_invert(LED_CDC_ACM_RX);
             break;
@@ -237,7 +240,7 @@ static void bsp_timer_handler(void * p_context)
 {
     UNUSED_PARAMETER(p_context);
 
-#if 1
+#if 0
     if(gtx_save == 1)
     {
         tickvalue++;
@@ -253,10 +256,8 @@ static void bsp_timer_handler(void * p_context)
     //gts_pre             = gts_cur;
     //gts_cur             = app_timer_cnt_get();
     //gts_gap[gts_cnt++]  = gts_cur - gts_pre;
-
     //if(gts_cnt >= MAX_GTS_GAP)
     //  gts_cnt = 0;
-
 #endif
 }
 
@@ -288,8 +289,6 @@ void Make_USBD_TX_DATA_PATTERN(uint8_t* dataPtr, uint32_t dataLen, uint32_t data
     }
 }
 
-
-
 int main(void)
 {
     ret_code_t ret;
@@ -306,6 +305,9 @@ int main(void)
         // Just waiting 
     }
     /// end clock set
+
+    nrf_delay_ms(100);
+
     app_usbd_serial_num_generate();
     ret = app_usbd_init(&usbd_config);
     APP_ERROR_CHECK(ret);
@@ -334,26 +336,9 @@ int main(void)
             /* Nothing to do */
         }
 
-
-        Make_USBD_TX_DATA_PATTERN(&usb_tx_buff[0], MAX_USB_TX_BUF_LEN,gtx_pkt_num);
-
         if(m_send_flag && m_send_tx_done)
         {
-
-#if 1
-            if(gtx_save == 0)
-            {
-                gts_cur  = app_timer_cnt_get();
-                gtx_save = 1;
-            }
-#else
-            gts_pre             = gts_cur;
-            gts_cur             = app_timer_cnt_get();
-            gts_gap[gts_cnt++]  = gts_cur - gts_pre;
-
-            if(gts_cnt >= MAX_GTS_GAP)
-                gts_cnt = 0;
-#endif
+            Make_USBD_TX_DATA_PATTERN(&usb_tx_buff[0], MAX_USB_TX_BUF_LEN,gtx_pkt_num);
             memcpy(m_tx_buffer,usb_tx_buff,MAX_USB_TX_BUF_LEN);
             app_usbd_cdc_acm_write(&m_app_cdc_acm, m_tx_buffer, MAX_USB_TX_BUF_LEN);
 
